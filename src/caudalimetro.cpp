@@ -37,6 +37,7 @@ void caudalimetroInit() {
 }
 
 
+
 void caudalimetroSnapshot(uint32_t destino[CAUDAL_N]) {
     noInterrupts();
     for (size_t i = 0; i < CAUDAL_N; i++) {
