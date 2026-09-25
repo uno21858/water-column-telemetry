@@ -11,5 +11,6 @@
 
 void redInit();
 void redAtender();
+bool redConectada();
 
 #endif //SERVICIOBECARIOSENSORESAGUA_RED_H
