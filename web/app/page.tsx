@@ -92,7 +92,7 @@ export default async function Page() {
         <main className="min-h-screen bg-[#0D121B] p-4 text-[#F0F0F0] md:p-10">
             <header className="mb-8 flex flex-wrap items-start justify-between gap-4">
                 <div>
-                    <h1 className="text-3xl font-semibold tracking-wide">SALA DE CONTROL</h1>
+                    <h1 className="text-3xl font-semibold tracking-wide">SALA DE CONTROL-IQ</h1>
                     <p className="text-sm text-[#969696]">Sistema de adsorción e instrumentación</p>
                 </div>
                 <div className="flex flex-col gap-1">
