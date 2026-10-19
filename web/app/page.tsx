@@ -1,5 +1,5 @@
 import type { ReactNode } from "react";
-import { medicionRango, type Medicion, type Tipo } from "@/lib/mediciones";
+import { medicionRango, ultimasLecturas, type Medicion, type Tipo } from "@/lib/mediciones";
 import { Grafica, type Serie } from "@/components/Grafica";
 import { Refrescar } from "@/components/Refrescar";
 import { Descargar } from "@/components/Descargar";
@@ -35,11 +35,6 @@ function serieDe(datos: Medicion[], tipo: Tipo, columna: number) {
         .map((d) => ({ t: Date.parse(d.ts), v: d.valor }));
 }
 
-function ultimo(datos: Medicion[], tipo: Tipo, columna: number): number | null {
-    const s = serieDe(datos, tipo, columna);
-    return s.length > 0 ? s[s.length - 1].v : null;
-}
-
 function series(datos: Medicion[], tipo: Tipo, columnas: number[], nombre: string): Serie[] {
     return columnas.map((n, i) => ({
         nombre: `${nombre} ${n}`,
@@ -50,6 +45,16 @@ function series(datos: Medicion[], tipo: Tipo, columnas: number[], nombre: strin
 
 function fmt(v: number | null, decimales: number) {
     return v === null ? "--" : v.toFixed(decimales);
+}
+
+const VIEJO = "text-[#6B7480]"; // gris para valores de una placa desconectada
+
+function hace(ms: number) {
+    const min = Math.floor(ms / 60_000);
+    if (min < 60) return `hace ${min} min`;
+    const h = Math.floor(min / 60);
+    if (h < 24) return `hace ${h} h ${min % 60} min`;
+    return `hace ${Math.floor(h / 24)} d`;
 }
 
 function Panel({ titulo, children, className = "" }: { titulo: string; children: ReactNode; className?: string }) {
@@ -78,11 +83,26 @@ export default async function Page() {
     // Server Component con force-dynamic: se renderiza una vez por request, leer la hora aquí es intencional
     // eslint-disable-next-line react-hooks/purity
     const hasta = Date.now();
-    const desde = hasta - VENTANA_MS;
-    const datos = await medicionRango(new Date(desde), new Date(hasta), "1 minute");
+    // Inicio redondeado al minuto: los promedios de 1 min caen siempre en los mismos cortes
+    // y la gráfica no se mueve entre refrescos si no hay datos nuevos
+    const desde = Math.floor((hasta - VENTANA_MS) / PASO_MS) * PASO_MS;
+    const [datos, ultimas] = await Promise.all([
+        medicionRango(new Date(desde), new Date(hasta), "1 minute"),
+        ultimasLecturas(),
+    ]);
 
-    const ultimaTs = datos.length > 0 ? Math.max(...datos.map((d) => Date.parse(d.ts))) : null;
+    const tiempos = [...ultimas.values()].map((u) => Date.parse(u.ts));
+    const ultimaTs = tiempos.length > 0 ? Math.max(...tiempos) : null;
     const enLinea = ultimaTs !== null && hasta - ultimaTs < EN_LINEA_MS;
+
+    // Último valor conocido de un sensor; si ya es viejo se muestra en gris
+    const ultimo = (tipo: Tipo, columna: number) => {
+        const u = ultimas.get(`${tipo}-${columna}`);
+        return {
+            v: u ? u.valor : null,
+            viejo: !u || hasta - Date.parse(u.ts) >= EN_LINEA_MS,
+        };
+    };
 
     const flujos = datos.filter((d) => d.tipo === "flujo" && FLUJOS.includes(d.columna));
     // La escala crece si algún valor pasa de 1.5, redondeando al siguiente 0.5
@@ -107,10 +127,13 @@ export default async function Page() {
                     </span>
                     <span className="pl-[25px] text-sm text-[#969696]">
                         {ultimaTs === null
-                            ? "Nada en los últimos 40 min"
-                            : `Última lectura ${new Date(ultimaTs).toLocaleTimeString("es-MX", {
+                            ? "Nunca ha llegado una lectura"
+                            : `Última lectura ${new Date(ultimaTs).toLocaleString("es-MX", {
                                   timeZone: "America/Mexico_City",
-                              })}`}
+                                  ...(hasta - ultimaTs < 24 * 60 * 60 * 1000
+                                      ? { timeStyle: "medium" }
+                                      : { dateStyle: "short", timeStyle: "short" }),
+                              })}${enLinea ? "" : ` · ${hace(hasta - ultimaTs)}`}`}
                     </span>
                     <div className="mt-2 pl-[25px]">
                         <Refrescar />
@@ -121,49 +144,58 @@ export default async function Page() {
             <div className="grid grid-cols-1 gap-6 lg:grid-cols-[45fr_53fr_38fr]">
                 <Panel titulo="pH">
                     <div className="grid grid-cols-3 gap-3">
-                        {SENSORES.map((n) => (
-                            <div key={n} className="flex flex-col items-center gap-3 rounded-lg bg-[#1F2A3A] px-2 py-5">
-                                <span className="text-xs text-[#A0A0A0]">SENSOR {n}</span>
-                                <span className="font-mono text-4xl text-[#FFBE41]">{fmt(ultimo(datos, "ph", n), 2)}</span>
-                                <span className="text-sm text-[#9B9B9B]">pH</span>
-                            </div>
-                        ))}
+                        {SENSORES.map((n) => {
+                            const ph = ultimo("ph", n);
+                            return (
+                                <div key={n} className="flex flex-col items-center gap-3 rounded-lg bg-[#1F2A3A] px-2 py-5">
+                                    <span className="text-xs text-[#A0A0A0]">SENSOR {n}</span>
+                                    <span className={`font-mono text-4xl ${ph.viejo ? VIEJO : "text-[#FFBE41]"}`}>
+                                        {fmt(ph.v, 2)}
+                                    </span>
+                                    <span className="text-sm text-[#9B9B9B]">pH</span>
+                                </div>
+                            );
+                        })}
                     </div>
                 </Panel>
 
                 <Panel titulo="Conductividad / TDS">
                     <div className="flex flex-col gap-2">
-                        {SENSORES.map((n) => (
-                            <div
-                                key={n}
-                                className="grid grid-cols-[auto_1fr_auto] items-center gap-3 rounded-md bg-[#1F2A3A] px-4 py-2.5"
-                            >
-                                <span className="text-sm text-[#DCDCDC]">SENSOR {n}</span>
-                                <span className="text-center font-mono text-lg text-[#41D2DC]">
-                                    {fmt(ultimo(datos, "ec", n), 1)} uS/cm
-                                </span>
-                                <span className="font-mono text-sm text-[#AAAAAA]">
-                                    {fmt(ultimo(datos, "tds", n), 1)} ppm
-                                </span>
-                            </div>
-                        ))}
+                        {SENSORES.map((n) => {
+                            const ec = ultimo("ec", n);
+                            const tds = ultimo("tds", n);
+                            return (
+                                <div
+                                    key={n}
+                                    className="grid grid-cols-[auto_1fr_auto] items-center gap-3 rounded-md bg-[#1F2A3A] px-4 py-2.5"
+                                >
+                                    <span className="text-sm text-[#DCDCDC]">SENSOR {n}</span>
+                                    <span className={`text-center font-mono text-lg ${ec.viejo ? VIEJO : "text-[#41D2DC]"}`}>
+                                        {fmt(ec.v, 1)} uS/cm
+                                    </span>
+                                    <span className={`font-mono text-sm ${tds.viejo ? VIEJO : "text-[#AAAAAA]"}`}>
+                                        {fmt(tds.v, 1)} ppm
+                                    </span>
+                                </div>
+                            );
+                        })}
                     </div>
                 </Panel>
 
                 <Panel titulo="Caudal">
                     <div className="flex flex-col gap-3">
                         {FLUJOS.map((n) => {
-                            const v = ultimo(datos, "flujo", n);
+                            const { v, viejo } = ultimo("flujo", n);
                             return (
                                 <div key={n} className="flex flex-col gap-1 rounded-lg bg-[#1F2A3A] px-4 py-3">
                                     <span className="flex items-center justify-between text-xs text-[#A0A0A0]">
                                         FLUJO {n}
-                                        {v !== null && v < MINIMO_FLUJO && (
+                                        {!viejo && v !== null && v < MINIMO_FLUJO && (
                                             <span className="text-amber-400">Abajo del mínimo del sensor</span>
                                         )}
                                     </span>
                                     <span className="flex items-baseline justify-between">
-                                        <span className="font-mono text-3xl text-[#46A0FF]">{fmt(v, 3)}</span>
+                                        <span className={`font-mono text-3xl ${viejo ? VIEJO : "text-[#46A0FF]"}`}>{fmt(v, 3)}</span>
                                         <span className="text-xs text-[#A0A0A0]">L/min</span>
                                     </span>
                                 </div>

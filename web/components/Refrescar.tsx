@@ -4,8 +4,6 @@ import { useEffect, useRef, useSyncExternalStore, useTransition } from "react";
 import { useRouter } from "next/navigation";
 
 const OPCIONES = [
-    { ms: 1000, texto: "1 s" },
-    { ms: 5000, texto: "5 s" },
     { ms: 10000, texto: "10 s" },
     { ms: 30000, texto: "30 s" },
     { ms: 60000, texto: "1 min" },
@@ -42,7 +40,8 @@ function suscribir(f: () => void) {
     return () => avisos.delete(f);
 }
 
-// Vuelve a pedir la página al servidor cada cierto tiempo, como la sala de control en vivo
+// Vuelve a pedir la página al servidor cada cierto tiempo, como la sala de control en vivo.
+// La placa sube cada 30 s, así que menos de 10 s no trae nada nuevo
 export function Refrescar() {
     const router = useRouter();
     const cadaMs = useSyncExternalStore(suscribir, leer, () => POR_DEFECTO);
@@ -57,13 +56,28 @@ export function Refrescar() {
         if (cadaMs === 0) {
             return;
         }
-        const id = setInterval(() => {
+        const refrescar = () => {
             // Si la consulta anterior no ha terminado, no se encima otra
             if (!cargandoRef.current) {
                 startTransition(() => router.refresh());
             }
+        };
+        // Con la pestaña oculta no se consulta nada; al volver se pone al día de inmediato
+        const id = setInterval(() => {
+            if (!document.hidden) {
+                refrescar();
+            }
         }, cadaMs);
-        return () => clearInterval(id);
+        const alVolver = () => {
+            if (!document.hidden) {
+                refrescar();
+            }
+        };
+        document.addEventListener("visibilitychange", alVolver);
+        return () => {
+            clearInterval(id);
+            document.removeEventListener("visibilitychange", alVolver);
+        };
     }, [router, cadaMs]);
 
     return (
