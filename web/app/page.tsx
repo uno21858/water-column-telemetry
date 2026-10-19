@@ -90,8 +90,6 @@ export default async function Page() {
 
     return (
         <main className="min-h-screen bg-[#0D121B] p-4 text-[#F0F0F0] md:p-10">
-            <Refrescar cadaMs={PASO_MS} />
-
             <header className="mb-8 flex flex-wrap items-start justify-between gap-4">
                 <div>
                     <h1 className="text-3xl font-semibold tracking-wide">SALA DE CONTROL</h1>
@@ -112,6 +110,9 @@ export default async function Page() {
                                   timeZone: "America/Mexico_City",
                               })}`}
                     </span>
+                    <div className="mt-2 pl-[25px]">
+                        <Refrescar />
+                    </div>
                 </div>
             </header>
 

@@ -13,7 +13,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Sala de control",
+  title: "Sala de control-IQ",
   description: "Sistema de adsorción e instrumentación",
 };
 

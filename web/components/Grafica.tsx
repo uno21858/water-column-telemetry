@@ -68,7 +68,10 @@ export function Grafica({
     zoom = false,
 }: Props) {
     const ref = useRef<HTMLDivElement>(null);
+    const graficaRef = useRef<echarts.ECharts | null>(null);
 
+    // La gráfica se crea una sola vez; con el autorefresh solo cambian los datos
+    // y así no parpadea ni pierde el zoom
     useEffect(() => {
         const contenedor = ref.current;
         if (!contenedor) {
@@ -76,6 +79,32 @@ export function Grafica({
         }
 
         const grafica = echarts.init(contenedor, null, { renderer: "canvas" });
+        graficaRef.current = grafica;
+
+        if (zoom) {
+            grafica.setOption({
+                dataZoom: [
+                    { type: "inside", filterMode: "none" },
+                    { type: "slider", filterMode: "none", height: 20, bottom: 12 },
+                ],
+            });
+        }
+
+        const observador = new ResizeObserver(() => grafica.resize());
+        observador.observe(contenedor);
+
+        return () => {
+            observador.disconnect();
+            grafica.dispose();
+            graficaRef.current = null;
+        };
+    }, [zoom]);
+
+    useEffect(() => {
+        const grafica = graficaRef.current;
+        if (!grafica) {
+            return;
+        }
 
         const opcion: Opcion = {
             backgroundColor: "transparent",
@@ -99,12 +128,6 @@ export function Grafica({
                 axisLabel: { color: "#96A0AA" },
                 splitLine: { lineStyle: { color: "#2D3A4B" } },
             },
-            dataZoom: zoom
-                ? [
-                    { type: "inside", filterMode: "none" },
-                    { type: "slider", filterMode: "none", height: 20, bottom: 12 },
-                ]
-                : [],
             series: series.map((s, i) => ({
                 type: "line",
                 name: s.nombre,
@@ -126,15 +149,8 @@ export function Grafica({
             })),
         };
 
-        grafica.setOption(opcion);
-
-        const observador = new ResizeObserver(() => grafica.resize());
-        observador.observe(contenedor);
-
-        return () => {
-            observador.disconnect();
-            grafica.dispose();
-        };
+        // replaceMerge: las series se reemplazan, el zoom se queda como estaba
+        grafica.setOption(opcion, { replaceMerge: ["series"] });
     }, [series, desde, hasta, unidad, decimales, min, max, minimo, zoom]);
 
     return <div ref={ref} style={{ width: "100%", height: alto }} />;
