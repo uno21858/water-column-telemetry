@@ -85,22 +85,21 @@ insert into sbagua.columnas (id, equipo_id, numero, medio) values
 
 -- Mega (ARDUINO-SALA-1.ino). Los id deben coincidir con SENSORES[] en
 -- src/puente.cpp. Llegan ya calibrados, por eso factor queda null.
--- Ahorita solo hay 2 columnas en uso; el resto se asigna después con
---   update sbagua.sensores set columna_id = 3 where id in (3, 7, 10, 13);
+-- Las 3 columnas en uso. El flujo 4 (D18) no tiene columna todavía.
 insert into sbagua.sensores (id, columna_id, tipo, modelo, unidad) values
     (1,  1,    'flujo', 'YF-S201',        'L/min'),  -- D2
     (2,  2,    'flujo', 'YF-S201',        'L/min'),  -- D3
-    (3,  null, 'flujo', 'YF-S201',        'L/min'),  -- D19
+    (3,  3,    'flujo', 'YF-S201',        'L/min'),  -- D19
     (4,  null, 'flujo', 'YF-S201',        'L/min'),  -- D18
     (5,  1,    'ph',    'pH analógico',   'pH'),     -- A0
     (6,  2,    'ph',    'pH analógico',   'pH'),     -- A1
-    (7,  null, 'ph',    'pH analógico',   'pH'),     -- A2
+    (7,  3,    'ph',    'pH analógico',   'pH'),     -- A2
     (8,  1,    'ec',    'TDS Meter V1.0', 'uS/cm'),  -- A4
     (9,  2,    'ec',    'TDS Meter V1.0', 'uS/cm'),  -- A5
-    (10, null, 'ec',    'TDS Meter V1.0', 'uS/cm'),  -- A6
+    (10, 3,    'ec',    'TDS Meter V1.0', 'uS/cm'),  -- A6
     (11, 1,    'tds',   'TDS Meter V1.0', 'ppm'),    -- A4
     (12, 2,    'tds',   'TDS Meter V1.0', 'ppm'),    -- A5
-    (13, null, 'tds',   'TDS Meter V1.0', 'ppm');    -- A6
+    (13, 3,    'tds',   'TDS Meter V1.0', 'ppm');    -- A6
 
 -- ---------------------------------------------------------------------------
 -- Vistas y funciones
