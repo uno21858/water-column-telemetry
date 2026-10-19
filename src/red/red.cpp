@@ -3,8 +3,7 @@
 #include <Arduino.h>
 #include <ESP8266WiFi.h>
 
-#include "../secretos.h"
-
+#include "../include/secretos.h"
 static constexpr uint32_t TIMEOUT_MS = 15000;
 
 void redInit() {
