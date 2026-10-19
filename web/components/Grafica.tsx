@@ -36,23 +36,37 @@ type Opcion = ComposeOption<
     | MarkLineComponentOption
 >;
 
-export type SerieCaudal = {
+export type Serie = {
     nombre: string;
     color: string;
     puntos: [number, number | null][];
 };
 
 type Props = {
-    series: SerieCaudal[];
+    series: Serie[];
     desde: number;
     hasta: number;
-    minimo: number;
-    max: number;
+    unidad: string;
+    decimales?: number;
+    min?: number;
+    max?: number; // sin max, ECharts ajusta la escala solo
+    minimo?: number; // línea punteada de referencia
     alto: number;
     zoom?: boolean;
 };
 
-export function GraficaCaudal({ series, desde, hasta, minimo, max, alto, zoom = false }: Props) {
+export function Grafica({
+    series,
+    desde,
+    hasta,
+    unidad,
+    decimales = 2,
+    min = 0,
+    max,
+    minimo,
+    alto,
+    zoom = false,
+}: Props) {
     const ref = useRef<HTMLDivElement>(null);
 
     useEffect(() => {
@@ -66,24 +80,24 @@ export function GraficaCaudal({ series, desde, hasta, minimo, max, alto, zoom = 
         const opcion: Opcion = {
             backgroundColor: "transparent",
             animation: false,
-            grid: { left: 36, right: 12, top: 12, bottom: zoom ? 56 : 24 },
+            grid: { left: 44, right: 12, top: 12, bottom: zoom ? 56 : 24 },
             tooltip: {
                 trigger: "axis",
-                valueFormatter: (v) => (typeof v === "number" ? `${v.toFixed(2)} L/min` : "sin dato"),
+                valueFormatter: (v) => (typeof v === "number" ? `${v.toFixed(decimales)} ${unidad}` : "sin dato"),
             },
             xAxis: {
                 type: "time",
                 min: desde,
                 max: hasta,
-                axisLabel: { color: "#9AA7B4" },
-                axisLine: { lineStyle: { color: "#243040" } },
+                axisLabel: { color: "#96A0AA" },
+                axisLine: { lineStyle: { color: "#2D3A4B" } },
             },
             yAxis: {
                 type: "value",
-                min: 0,
+                min,
                 max,
-                axisLabel: { color: "#9AA7B4" },
-                splitLine: { lineStyle: { color: "#243040" } },
+                axisLabel: { color: "#96A0AA" },
+                splitLine: { lineStyle: { color: "#2D3A4B" } },
             },
             dataZoom: zoom
                 ? [
@@ -100,7 +114,7 @@ export function GraficaCaudal({ series, desde, hasta, minimo, max, alto, zoom = 
                 lineStyle: { color: s.color, width: 2 },
                 itemStyle: { color: s.color },
                 markLine:
-                    i === 0
+                    i === 0 && minimo !== undefined
                         ? {
                             silent: true,
                             symbol: "none",
@@ -121,7 +135,7 @@ export function GraficaCaudal({ series, desde, hasta, minimo, max, alto, zoom = 
             observador.disconnect();
             grafica.dispose();
         };
-    }, [series, desde, hasta, minimo, max, zoom]);
+    }, [series, desde, hasta, unidad, decimales, min, max, minimo, zoom]);
 
     return <div ref={ref} style={{ width: "100%", height: alto }} />;
 }
