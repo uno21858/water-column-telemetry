@@ -2,6 +2,8 @@ import type { ReactNode } from "react";
 import { medicionRango, type Medicion, type Tipo } from "@/lib/mediciones";
 import { Grafica, type Serie } from "@/components/Grafica";
 import { Refrescar } from "@/components/Refrescar";
+import { Descargar } from "@/components/Descargar";
+import { aLocal } from "@/lib/hora";
 
 export const dynamic = "force-dynamic";
 
@@ -212,6 +214,13 @@ export default async function Page() {
                     />
                 </Panel>
             </div>
+
+            <Panel titulo="Descargar datos" className="mt-6">
+                <Descargar
+                    desdeInicial={aLocal(new Date(hasta - 24 * 60 * 60 * 1000))}
+                    hastaInicial={aLocal(new Date(hasta))}
+                />
+            </Panel>
         </main>
     );
 }
