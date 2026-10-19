@@ -1,4 +1,4 @@
-#ifndef MODO_CALIBRACION
+#if !defined(MODO_CALIBRACION) && !defined(MODO_PUENTE)
 
 #include <Arduino.h>
 

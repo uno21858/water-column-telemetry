@@ -13,31 +13,40 @@
 static constexpr uint8_t SENSOR_ID_CAUDAL[CAUDAL_N] = {1, 2, 3, 4};
 
 bool dbEnviarCaudal(const uint32_t p[CAUDAL_N]) {
-    if (!redConectada()) {
+    Lectura lote[CAUDAL_N];
+    for (size_t i = 0; i < CAUDAL_N; i++) {
+        lote[i] = {SENSOR_ID_CAUDAL[i], static_cast<int32_t>(p[i])};
+    }
+    return dbEnviar(lote, CAUDAL_N);
+}
+
+bool dbEnviar(const Lectura *lecturas, size_t n) {
+    if (n == 0 || !redConectada()) {
         return false;
     }
 
-    char cuerpo[256];
-    size_t n = 0;
-    cuerpo[n++] = '[';
+    char cuerpo[512];
+    size_t largo = 0;
+    cuerpo[largo++] = '[';
 
-    for (size_t i = 0; i < CAUDAL_N; i++) {
-        int escrito = snprintf(cuerpo + n, sizeof(cuerpo) - n,
-                               "%s{\"sensor_id\":%u,\"valor\":%u}",
+    for (size_t i = 0; i < n; i++) {
+        int escrito = snprintf(cuerpo + largo, sizeof(cuerpo) - largo,
+                               "%s{\"sensor_id\":%u,\"valor\":%ld}",
                                i ? "," : "",
-                               static_cast<unsigned>(SENSOR_ID_CAUDAL[i]),
-                               static_cast<unsigned>(p[i]));
-        if (escrito < 0 || static_cast<size_t>(escrito) >= sizeof(cuerpo) - n) {
+                               static_cast<unsigned>(lecturas[i].sensor_id),
+                               static_cast<long>(lecturas[i].valor));
+        if (escrito < 0 || static_cast<size_t>(escrito) >= sizeof(cuerpo) - largo) {
+            Serial.println("lote demasiado grande para el buffer");
             return false;
         }
-        n += escrito;
+        largo += escrito;
     }
 
-    if (n + 2 > sizeof(cuerpo)) {
+    if (largo + 2 > sizeof(cuerpo)) {
         return false;
     }
-    cuerpo[n++] = ']';
-    cuerpo[n] = '\0';
+    cuerpo[largo++] = ']';
+    cuerpo[largo] = '\0';
 
     BearSSL::WiFiClientSecure cliente;
     cliente.setInsecure();
@@ -52,12 +61,15 @@ bool dbEnviarCaudal(const uint32_t p[CAUDAL_N]) {
     http.addHeader("Content-Type", "application/json");
     http.addHeader("Prefer", "return=minimal");
 
-    int codigo = http.POST(reinterpret_cast<const uint8_t*>(cuerpo), n);
-    http.end();
+    int codigo = http.POST(reinterpret_cast<const uint8_t*>(cuerpo), largo);
 
     if (codigo != 201) {
-        Serial.printf("POST fallo: %d\n", codigo);
+        // El cuerpo trae el error de Postgres, p. ej. un sensor_id que no existe
+        Serial.printf("POST fallo: %d %s\n", codigo,
+                      codigo > 0 ? http.getString().c_str() : "");
+        http.end();
         return false;
     }
+    http.end();
     return true;
 }
