@@ -1,44 +1,26 @@
 #pragma once
 
 #include <cstddef>
-#include <cstdint>
 
-#include "../red/lectura.h"
-
-/// Un grupo de la línea del Mega: su letra, cuántos valores trae y a qué
-/// sensor va cada uno, en el orden en que llegan.
-struct Grupo {
-    char etiqueta;
-    const uint16_t *sensores;
-    size_t n;
-};
+/// Valores por línea después del tiempo:
+/// pH1..3, EC1..3, TDS1..3, F1..4
+constexpr size_t TRAMA_N = 13;
 
 enum class ResultadoLinea {
     ok,
-    formato,    // falta '$' o '*HH', sobra o falta un campo
-    checksum,   // la línea llegó corrupta
-    grupo,      // letra desconocida o repetida, o falta un grupo
-    conteo,     // el Mega manda otro número de valores que el configurado aquí
-    valor,      // un valor no es entero positivo o no cabe en integer
-    capacidad,  // el arreglo destino es muy chico
+    formato,  // no empieza con "DATA," o sobran/faltan campos
+    valor,    // un campo no es número
 };
 
 const char *resultadoTexto(ResultadoLinea r);
 
-/// Valida y convierte una línea del Mega en lecturas.
+/// Lee una línea del Mega con el formato
+/// DATA,tiempo_ms,pH1,pH2,pH3,EC1,EC2,EC3,TDS1,TDS2,TDS3,F1,F2,F3,F4
 ///
-/// Formato: $<grupo>,<grupo>,...*HH
-/// Cada grupo es <letra>,<n>,<v1>,...,<vn>. HH es el XOR en hex de todo lo que
-/// hay entre '$' y '*'. Un valor vacío es un sensor sin dato y no genera lectura.
+/// La línea no trae checksum, así que se valida estricto: exactamente
+/// TRAMA_N + 1 campos y todos numéricos. Es todo o nada: si algo falla,
+/// valores no se toca.
 ///
-/// Es todo o nada: ante cualquier error n queda en 0. Así nunca se sube un lote
-/// a medias ni un valor asignado al sensor equivocado.
-///
-/// @param linea    Línea completa, sin \r ni \n.
-/// @param grupos   Grupos esperados. Cada uno debe venir exactamente una vez.
-/// @param destino  Donde se escriben las lecturas.
-/// @param cap      Capacidad de destino.
-/// @param n        Lecturas escritas.
-ResultadoLinea lineaParsear(const char *linea,
-                            const Grupo *grupos, size_t gruposN,
-                            Lectura *destino, size_t cap, size_t &n);
+/// @param linea   Línea completa, sin \r ni \n.
+/// @param valores Donde se escriben los TRAMA_N valores (sin el tiempo).
+ResultadoLinea lineaParsear(const char *linea, float valores[TRAMA_N]);

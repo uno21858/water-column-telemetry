@@ -15,7 +15,7 @@ static constexpr uint8_t SENSOR_ID_CAUDAL[CAUDAL_N] = {1, 2, 3, 4};
 bool dbEnviarCaudal(const uint32_t p[CAUDAL_N]) {
     Lectura lote[CAUDAL_N];
     for (size_t i = 0; i < CAUDAL_N; i++) {
-        lote[i] = {SENSOR_ID_CAUDAL[i], static_cast<int32_t>(p[i])};
+        lote[i] = {SENSOR_ID_CAUDAL[i], static_cast<float>(p[i])};
     }
     return dbEnviar(lote, CAUDAL_N);
 }
@@ -25,16 +25,16 @@ bool dbEnviar(const Lectura *lecturas, size_t n) {
         return false;
     }
 
-    char cuerpo[512];
+    char cuerpo[1024];
     size_t largo = 0;
     cuerpo[largo++] = '[';
 
     for (size_t i = 0; i < n; i++) {
         int escrito = snprintf(cuerpo + largo, sizeof(cuerpo) - largo,
-                               "%s{\"sensor_id\":%u,\"valor\":%ld}",
+                               "%s{\"sensor_id\":%u,\"valor\":%.4f}",
                                i ? "," : "",
                                static_cast<unsigned>(lecturas[i].sensor_id),
-                               static_cast<long>(lecturas[i].valor));
+                               static_cast<double>(lecturas[i].valor));
         if (escrito < 0 || static_cast<size_t>(escrito) >= sizeof(cuerpo) - largo) {
             Serial.println("lote demasiado grande para el buffer");
             return false;

@@ -2,8 +2,8 @@
 
 #include <cstdint>
 
-/// Una fila de sbagua.lecturas: qué sensor y su valor crudo.
+/// Una fila de sbagua.lecturas: qué sensor y su valor.
 struct Lectura {
     uint16_t sensor_id;  // smallint en Postgres
-    int32_t valor;       // integer en Postgres
+    float valor;         // double precision en Postgres
 };

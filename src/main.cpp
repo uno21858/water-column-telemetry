@@ -7,8 +7,10 @@
 #include "sensores/caudalimetro.h"
 #include "sensores/presion.h"
 
-static constexpr uint32_t INTERVALO_MS = 60000;
+static constexpr uint32_t INTERVALO_MS = 30000;  // cada cuánto se sube a la DB
+static constexpr uint32_t MONITOR_MS = 1000;     // cada cuánto se imprime en el monitor
 
+// p son pulsos por minuto
 static void imprimirCaudal(Print &salida, const uint32_t p[CAUDAL_N]) {
     for (size_t i = 0; i < CAUDAL_N; i++) {
         salida.printf("tubo%u=%u ", i + 1, p[i]);
@@ -37,21 +39,42 @@ void setup() {
 }
 
 void loop() {
-    static uint32_t t0 = 0;
+    static uint32_t tMon = millis();
+    static uint32_t tDb = millis();
+    static uint32_t loteDb[CAUDAL_N] = {};  // pulsos acumulados para la DB
 
-    if (millis() - t0 >= INTERVALO_MS) {
-        t0 = millis();
+    uint32_t ahora = millis();
+    if (ahora - tMon < MONITOR_MS) {
+        return;
+    }
 
-        uint32_t caudal[CAUDAL_N];
-        caudalimetroSnapshot(caudal);
+    // Los pulsos de cada impresión se suman al lote de la DB, así no se pierde
+    // ninguno aunque el snapshot reinicie los contadores.
+    uint32_t caudal[CAUDAL_N];
+    caudalimetroSnapshot(caudal);
+    uint32_t transcurrido = ahora - tMon;
+    tMon = ahora;
 
-        int16_t presion[PRESION_N];
-        if (presionLeer(presion)) {
-            imprimirPresion(Serial, presion);
+    for (size_t i = 0; i < CAUDAL_N; i++) {
+        loteDb[i] += caudal[i];
+        caudal[i] = static_cast<uint64_t>(caudal[i]) * 60000 / transcurrido;
+    }
+
+    int16_t presion[PRESION_N];
+    if (presionLeer(presion)) {
+        imprimirPresion(Serial, presion);
+    }
+    imprimirCaudal(Serial, caudal);
+
+    if (ahora - tDb >= INTERVALO_MS) {
+        // La vista sbagua.caudal espera pulsos por minuto
+        uint32_t ms = ahora - tDb;
+        for (size_t i = 0; i < CAUDAL_N; i++) {
+            loteDb[i] = static_cast<uint64_t>(loteDb[i]) * 60000 / ms;
         }
-
-        imprimirCaudal(Serial, caudal);
-        dbEnviarCaudal(caudal);
+        tDb = ahora;
+        dbEnviarCaudal(loteDb);
+        for (auto &p : loteDb) p = 0;
     }
 }
 

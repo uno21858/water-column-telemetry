@@ -1,136 +1,777 @@
-//
-// Created by Erick on 10/16/26.
-//
-
-
 #include <Arduino.h>
 
-// ---- Configuración: ajustar a lo que está cableado en el banco ----
+// ============================================================================
+// SISTEMA DE ADQUISICION FINAL
+// Arduino Mega 2560
+//
+// 3 sensores de pH
+// 3 sensores TDS Meter V1.0
+// 4 medidores de flujo
+// Wemos D1 ESP8266 por Serial2
+// Processing por USB/Serial
+//
+// SIN microSD
+// SIN ADS1115
+// SIN sensor de presion diferencial
+//
+// Trama enviada por USB y Serial2:
+//
+// DATA,tiempo_ms,pH1,pH2,pH3,EC1,EC2,EC3,TDS1,TDS2,TDS3,F1,F2,F3,F4
+//
+// ============================================================================
 
-constexpr uint8_t PINES_PH[] = {A0, A1, A2};
-constexpr uint8_t PINES_TDS[] = {A4, A5, A6};
 
-// Caudalímetros: solo pines con interrupción externa (2, 3, 18, 19).
-constexpr uint8_t PINES_CAUDAL[] = {2, 3};
+// ============================================================================
+// CONFIGURACION GENERAL
+// ============================================================================
 
-constexpr uint32_t INTERVALO_MS = 60000;  // mismo intervalo que la WeMos
-constexpr uint8_t MUESTRAS = 50;          // mismo promedio que la calibración de pH
-constexpr uint8_t ESPERA_MS = 10;         // separación entre muestras, igual que la calibración
-constexpr uint32_t BAUD_WEMOS = 9600;
+// IMPORTANTE:
+// Estas calibraciones fueron obtenidas usando VREF = 5.0.
+// No cambiar VREF sin recalibrar los sensores.
+const float VREF = 5.0;
 
-// ---- Fin de configuración ----
+// Intervalo nominal entre reportes
+const unsigned long INTERVALO_MS = 1000;
 
-constexpr size_t N_PH = sizeof(PINES_PH) / sizeof(PINES_PH[0]);
-constexpr size_t N_TDS = sizeof(PINES_TDS) / sizeof(PINES_TDS[0]);
-constexpr size_t N_CAUDAL = sizeof(PINES_CAUDAL) / sizeof(PINES_CAUDAL[0]);
+unsigned long tiempoAnterior = 0;
 
-static_assert(N_CAUDAL <= 4, "El Mega solo tiene 4 pines de interrupcion libres");
 
-volatile uint32_t pulsos[4];
+// ============================================================================
+// SENSORES DE pH
+// ============================================================================
+//
+// pH 1 -> A0
+// pH 2 -> A1
+// pH 3 -> A2
+//
+// Ecuacion:
+//
+// pH = m*V + b
+//
+// Calibraciones actuales
+// ============================================================================
 
-template <uint8_t I>
-void isrCaudal() {
-    pulsos[I]++;
+const uint8_t PIN_PH[3] = {
+  A0,
+  A1,
+  A2
+};
+
+const float PH_M[3] = {
+  -5.67208390,
+  -6.03940842,
+  -5.56072783
+};
+
+const float PH_B[3] = {
+  14.80293456,
+  14.20090073,
+  13.96646129
+};
+
+
+// Valores medidos
+float voltajePH[3] = {
+  0.0,
+  0.0,
+  0.0
+};
+
+float valorPH[3] = {
+  0.0,
+  0.0,
+  0.0
+};
+
+
+// ============================================================================
+// SENSORES TDS / CONDUCTIVIDAD
+// ============================================================================
+//
+// TDS 1 -> A4
+// TDS 2 -> A5
+// TDS 3 -> A6
+// ============================================================================
+
+const uint8_t PIN_TDS[3] = {
+  A4,
+  A5,
+  A6
+};
+
+// Temperatura utilizada actualmente para compensacion.
+// Cambiar cuando tengas medicion real de temperatura.
+float temperatura = 30.0;
+
+// Factores de calibracion actuales
+float K_TDS[3] = {
+  0.878,
+  1.04,
+  2.02
+};
+
+// Filtro exponencial
+const float ALFA_TDS = 0.2;
+
+float ecFiltrada[3] = {
+  0.0,
+  0.0,
+  0.0
+};
+
+bool ecInicializada[3] = {
+  false,
+  false,
+  false
+};
+
+
+// Valores medidos
+float voltajeTDS[3] = {
+  0.0,
+  0.0,
+  0.0
+};
+
+float ec[3] = {
+  0.0,
+  0.0,
+  0.0
+};
+
+float tds[3] = {
+  0.0,
+  0.0,
+  0.0
+};
+
+
+// ============================================================================
+// MEDIDORES DE FLUJO
+// ============================================================================
+//
+// Flujo 1 -> D2
+// Flujo 2 -> D3
+// Flujo 3 -> D19
+// Flujo 4 -> D18
+//
+// Factor actual:
+// 313.5 pulsos / litro
+// ============================================================================
+
+const uint8_t PIN_FLUJO[4] = {
+  2,
+  3,
+  19,
+  18
+};
+
+const float PULSOS_POR_LITRO = 313.5;
+
+
+// Contadores de interrupcion
+volatile unsigned long pulsos1 = 0;
+volatile unsigned long pulsos2 = 0;
+volatile unsigned long pulsos3 = 0;
+volatile unsigned long pulsos4 = 0;
+
+
+// Caudales calculados
+float caudal[4] = {
+  0.0,
+  0.0,
+  0.0,
+  0.0
+};
+
+
+// ============================================================================
+// INTERRUPCIONES
+// ============================================================================
+
+void ISR_Flujo1() {
+  pulsos1++;
 }
 
-void (*const ISRS[4])() = {isrCaudal<0>, isrCaudal<1>, isrCaudal<2>, isrCaudal<3>};
-
-char linea[160];
-size_t pos = 0;
-
-template <typename... T>
-void agregar(const char *fmt, T... args) {
-    if (pos >= sizeof(linea)) return;
-    int n = snprintf(linea + pos, sizeof(linea) - pos, fmt, args...);
-    if (n > 0) pos += n;
+void ISR_Flujo2() {
+  pulsos2++;
 }
 
-// Promedio en décimas de cuenta del ADC (0 a 10230).
-// valor / 10 = cuentas; cuentas * 5.0 / 1023 = voltios, misma fórmula de la calibración.
-uint16_t leerAnalogico(uint8_t pin) {
-    analogRead(pin);  // se descarta la primera lectura tras cambiar de canal
-    delayMicroseconds(200);
-    uint32_t suma = 0;
-    for (uint8_t i = 0; i < MUESTRAS; i++) {
-        suma += analogRead(pin);
-        delay(ESPERA_MS);
-    }
-    return (suma * 10 + MUESTRAS / 2) / MUESTRAS;
+void ISR_Flujo3() {
+  pulsos3++;
 }
 
-void agregarAnalogicos(const uint8_t *pines, size_t n) {
-    for (size_t i = 0; i < n; i++) {
-        agregar(",%u", leerAnalogico(pines[i]));
-    }
+void ISR_Flujo4() {
+  pulsos4++;
 }
 
-// Formato: $H,<n>,<ph...>,T,<n>,<tds...>,C,<n>,<pulsos...>*HH
-// H y T en décimas de cuenta del ADC; C en pulsos acumulados del intervalo.
-// HH = XOR en hex de todo lo que hay entre '$' y '*'.
-void enviar() {
-    uint32_t snap[4];
-    noInterrupts();
-    for (size_t i = 0; i < N_CAUDAL; i++) {
-        snap[i] = pulsos[i];
-        pulsos[i] = 0;
-    }
-    interrupts();
 
-    pos = 0;
-    agregar("H,%u", (unsigned)N_PH);
-    agregarAnalogicos(PINES_PH, N_PH);
-    agregar(",T,%u", (unsigned)N_TDS);
-    agregarAnalogicos(PINES_TDS, N_TDS);
-    agregar(",C,%u", (unsigned)N_CAUDAL);
-    for (size_t i = 0; i < N_CAUDAL; i++) {
-        agregar(",%lu", (unsigned long)snap[i]);
-    }
+// ============================================================================
+// LECTURA pH
+// ============================================================================
+//
+// Se conserva una lectura promediada para mantener consistencia
+// con la calibracion que hemos utilizado.
+// ============================================================================
 
-    if (pos >= sizeof(linea)) {
-        Serial.println(F("ERROR: linea demasiado larga, lote descartado"));
-        return;
-    }
+float leerVoltajePH(uint8_t pin) {
 
-    uint8_t chk = 0;
-    for (size_t i = 0; i < pos; i++) chk ^= (uint8_t)linea[i];
+  const uint8_t NUM_MUESTRAS = 30;
 
-    char cola[4];
-    snprintf(cola, sizeof(cola), "*%02X", chk);
+  uint32_t suma = 0;
 
-    Serial2.print('$');
-    Serial2.print(linea);
-    Serial2.println(cola);
+  // Lectura de descarte despues de cambiar de canal ADC
+  analogRead(pin);
+  delayMicroseconds(200);
 
-    Serial.print('$');
-    Serial.print(linea);
-    Serial.println(cola);
+  for (uint8_t i = 0; i < NUM_MUESTRAS; i++) {
+
+    suma += analogRead(pin);
+
+    delay(10);
+  }
+
+  float promedio =
+    suma / (float)NUM_MUESTRAS;
+
+  return promedio * VREF / 1023.0;
 }
+
+
+// ============================================================================
+// CALCULO pH
+// ============================================================================
+
+void leerPH() {
+
+  for (uint8_t i = 0; i < 3; i++) {
+
+    voltajePH[i] =
+      leerVoltajePH(PIN_PH[i]);
+
+    valorPH[i] =
+      PH_M[i] * voltajePH[i]
+      +
+      PH_B[i];
+  }
+}
+
+
+// ============================================================================
+// LECTURA TDS
+// ============================================================================
+//
+// Se conserva el metodo de mediana de tu codigo de calibracion.
+// ============================================================================
+
+float leerVoltajeTDS(uint8_t pin) {
+
+  int buf[30];
+
+  // Lectura de descarte
+  analogRead(pin);
+
+  for (int i = 0; i < 30; i++) {
+
+    buf[i] =
+      analogRead(pin);
+
+    delay(10);
+  }
+
+
+  // Ordenamiento
+  for (int i = 0; i < 29; i++) {
+
+    for (int j = i + 1; j < 30; j++) {
+
+      if (buf[j] < buf[i]) {
+
+        int temporal =
+          buf[i];
+
+        buf[i] =
+          buf[j];
+
+        buf[j] =
+          temporal;
+      }
+    }
+  }
+
+
+  // Se mantiene /1024.0 para conservar exactamente
+  // la base usada por la calibracion TDS actual.
+  return buf[15] * VREF / 1024.0;
+}
+
+
+// ============================================================================
+// TDS CRUDO
+// ============================================================================
+
+float calcularTDSCrudo(float voltaje) {
+
+  float coefTemperatura =
+    1.0
+    +
+    0.02
+    *
+    (temperatura - 25.0);
+
+
+  float voltajeCompensado =
+    voltaje
+    /
+    coefTemperatura;
+
+
+  float resultado =
+    (
+      133.42
+      *
+      voltajeCompensado
+      *
+      voltajeCompensado
+      *
+      voltajeCompensado
+
+      -
+
+      255.86
+      *
+      voltajeCompensado
+      *
+      voltajeCompensado
+
+      +
+
+      857.39
+      *
+      voltajeCompensado
+    )
+    *
+    0.5;
+
+
+  return resultado;
+}
+
+
+// ============================================================================
+// FILTRO EC
+// ============================================================================
+
+float suavizarEC(
+  uint8_t sensor,
+  float ecNueva
+) {
+
+  if (!ecInicializada[sensor]) {
+
+    ecFiltrada[sensor] =
+      ecNueva;
+
+    ecInicializada[sensor] =
+      true;
+  }
+
+
+  ecFiltrada[sensor] +=
+    ALFA_TDS
+    *
+    (
+      ecNueva
+      -
+      ecFiltrada[sensor]
+    );
+
+
+  return ecFiltrada[sensor];
+}
+
+
+// ============================================================================
+// LECTURA CONDUCTIVIDAD
+// ============================================================================
+
+void leerTDS() {
+
+  for (uint8_t i = 0; i < 3; i++) {
+
+    voltajeTDS[i] =
+      leerVoltajeTDS(
+        PIN_TDS[i]
+      );
+
+
+    float tdsCrudo =
+      calcularTDSCrudo(
+        voltajeTDS[i]
+      );
+
+
+    // Conductividad calibrada en uS/cm
+    float ecNueva =
+      K_TDS[i]
+      *
+      tdsCrudo
+      *
+      2.0;
+
+
+    ec[i] =
+      suavizarEC(
+        i,
+        ecNueva
+      );
+
+
+    // Conversion empleada actualmente
+    // TDS = EC * 0.5
+    tds[i] =
+      ec[i]
+      *
+      0.5;
+  }
+}
+
+
+// ============================================================================
+// CALCULO DE CAUDAL
+// ============================================================================
+
+void calcularCaudal(
+  float tiempoSegundos
+) {
+
+  unsigned long p1;
+  unsigned long p2;
+  unsigned long p3;
+  unsigned long p4;
+
+
+  // Copiar y borrar contadores atomicamente
+  noInterrupts();
+
+  p1 = pulsos1;
+  p2 = pulsos2;
+  p3 = pulsos3;
+  p4 = pulsos4;
+
+  pulsos1 = 0;
+  pulsos2 = 0;
+  pulsos3 = 0;
+  pulsos4 = 0;
+
+  interrupts();
+
+
+  if (tiempoSegundos <= 0.0) {
+    return;
+  }
+
+
+  // Pulsos -> litros -> L/min
+
+  caudal[0] =
+    (p1 / PULSOS_POR_LITRO)
+    *
+    (60.0 / tiempoSegundos);
+
+
+  caudal[1] =
+    (p2 / PULSOS_POR_LITRO)
+    *
+    (60.0 / tiempoSegundos);
+
+
+  caudal[2] =
+    (p3 / PULSOS_POR_LITRO)
+    *
+    (60.0 / tiempoSegundos);
+
+
+  caudal[3] =
+    (p4 / PULSOS_POR_LITRO)
+    *
+    (60.0 / tiempoSegundos);
+}
+
+
+// ============================================================================
+// ENVIAR TRAMA
+// ============================================================================
+//
+// Se utiliza la misma funcion para:
+//
+// Serial  -> Processing / PC
+// Serial2 -> Wemos D1
+//
+// ============================================================================
+
+void enviarTrama(Print &salida) {
+
+  salida.print("DATA,");
+
+  // Tiempo
+  salida.print(millis());
+  salida.print(",");
+
+
+  // pH
+  salida.print(valorPH[0], 3);
+  salida.print(",");
+
+  salida.print(valorPH[1], 3);
+  salida.print(",");
+
+  salida.print(valorPH[2], 3);
+  salida.print(",");
+
+
+  // Conductividad
+  salida.print(ec[0], 1);
+  salida.print(",");
+
+  salida.print(ec[1], 1);
+  salida.print(",");
+
+  salida.print(ec[2], 1);
+  salida.print(",");
+
+
+  // TDS
+  salida.print(tds[0], 1);
+  salida.print(",");
+
+  salida.print(tds[1], 1);
+  salida.print(",");
+
+  salida.print(tds[2], 1);
+  salida.print(",");
+
+
+  // Caudal
+  salida.print(caudal[0], 3);
+  salida.print(",");
+
+  salida.print(caudal[1], 3);
+  salida.print(",");
+
+  salida.print(caudal[2], 3);
+  salida.print(",");
+
+  salida.println(caudal[3], 3);
+}
+
+
+// ============================================================================
+// SETUP
+// ============================================================================
 
 void setup() {
-    Serial.begin(115200);
-    Serial2.begin(BAUD_WEMOS);
-    analogReference(DEFAULT);
 
-    for (size_t i = 0; i < N_CAUDAL; i++) {
-        int irq = digitalPinToInterrupt(PINES_CAUDAL[i]);
-        if (irq == NOT_AN_INTERRUPT) {
-            Serial.print(F("ERROR: pin sin interrupcion: "));
-            Serial.println(PINES_CAUDAL[i]);
-            continue;
-        }
-        pinMode(PINES_CAUDAL[i], INPUT_PULLUP);
-        attachInterrupt(irq, ISRS[i], FALLING);
-    }
+  // USB -> PC / Processing
+  Serial.begin(115200);
 
-    Serial.print(F("Mega listo, primera linea en "));
-    Serial.print(INTERVALO_MS / 1000);
-    Serial.println(F(" s"));
+  // Mega TX2 pin 16 -> RX Wemos
+  // Mega RX2 pin 17 <- TX Wemos
+  Serial2.begin(9600);  // 9600: la WeMos lo lee por SoftwareSerial, a 115200 pierde bytes
+
+
+  analogReference(DEFAULT);
+
+
+  // --------------------------------------------------------------------------
+  // pH
+  // --------------------------------------------------------------------------
+
+  for (uint8_t i = 0; i < 3; i++) {
+
+    pinMode(
+      PIN_PH[i],
+      INPUT
+    );
+  }
+
+
+  // --------------------------------------------------------------------------
+  // TDS
+  // --------------------------------------------------------------------------
+
+  for (uint8_t i = 0; i < 3; i++) {
+
+    pinMode(
+      PIN_TDS[i],
+      INPUT
+    );
+  }
+
+
+  // --------------------------------------------------------------------------
+  // FLUJO
+  // --------------------------------------------------------------------------
+
+  pinMode(
+    PIN_FLUJO[0],
+    INPUT_PULLUP
+  );
+
+  pinMode(
+    PIN_FLUJO[1],
+    INPUT_PULLUP
+  );
+
+  pinMode(
+    PIN_FLUJO[2],
+    INPUT_PULLUP
+  );
+
+  pinMode(
+    PIN_FLUJO[3],
+    INPUT_PULLUP
+  );
+
+
+  attachInterrupt(
+    digitalPinToInterrupt(
+      PIN_FLUJO[0]
+    ),
+    ISR_Flujo1,
+    FALLING
+  );
+
+
+  attachInterrupt(
+    digitalPinToInterrupt(
+      PIN_FLUJO[1]
+    ),
+    ISR_Flujo2,
+    FALLING
+  );
+
+
+  attachInterrupt(
+    digitalPinToInterrupt(
+      PIN_FLUJO[2]
+    ),
+    ISR_Flujo3,
+    FALLING
+  );
+
+
+  attachInterrupt(
+    digitalPinToInterrupt(
+      PIN_FLUJO[3]
+    ),
+    ISR_Flujo4,
+    FALLING
+  );
+
+
+  delay(1000);
+
+
+  tiempoAnterior =
+    millis();
+
+
+  Serial.println(
+    "=== SISTEMA DE ADQUISICION INICIADO ==="
+  );
+
+  Serial.println(
+    "pH: A0 A1 A2"
+  );
+
+  Serial.println(
+    "TDS: A4 A5 A6"
+  );
+
+  Serial.println(
+    "Flujo: D2 D3 D19 D18"
+  );
+
+  Serial.println(
+    "Wemos: Serial2 TX2=16 RX2=17"
+  );
+
+  Serial.println(
+    "Esperando datos..."
+  );
 }
 
+
+// ============================================================================
+// LOOP
+// ============================================================================
+
 void loop() {
-    static uint32_t ultimo = millis();
-    if (millis() - ultimo >= INTERVALO_MS) {
-        ultimo += INTERVALO_MS;  // sin deriva acumulada
-        enviar();
-    }
+
+  unsigned long ahora =
+    millis();
+
+
+  if (
+    ahora - tiempoAnterior
+    >=
+    INTERVALO_MS
+  ) {
+
+    // Tiempo REAL transcurrido entre ventanas de conteo
+    float tiempoSegundos =
+      (
+        ahora
+        -
+        tiempoAnterior
+      )
+      /
+      1000.0;
+
+
+    tiempoAnterior =
+      ahora;
+
+
+    // --------------------------------------------------------
+    // CAUDAL
+    // --------------------------------------------------------
+
+    calcularCaudal(
+      tiempoSegundos
+    );
+
+
+    // --------------------------------------------------------
+    // pH
+    // --------------------------------------------------------
+
+    leerPH();
+
+
+    // --------------------------------------------------------
+    // CONDUCTIVIDAD
+    // --------------------------------------------------------
+
+    leerTDS();
+
+
+    // --------------------------------------------------------
+    // PC / PROCESSING
+    // --------------------------------------------------------
+
+    enviarTrama(
+      Serial
+    );
+
+
+    // --------------------------------------------------------
+    // WEMOS
+    // --------------------------------------------------------
+
+    enviarTrama(
+      Serial2
+    );
+  }
 }
