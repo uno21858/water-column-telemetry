@@ -23,11 +23,12 @@ static constexpr uint32_t INTERVALO_MS = 30000;  // cada cuánto se sube a la DB
 // sensor_id de cada valor de la línea, en el mismo orden:
 // pH1..3, EC1..3, TDS1..3, F1..4. Tienen que existir en sbagua.sensores
 // (db/esquema.sql): si uno no existe, Supabase rechaza el lote completo.
+// 0 = no se sube (el Mega lo manda, pero no hay sensor conectado).
 static constexpr uint16_t SENSORES[TRAMA_N] = {
     5, 6, 7,        // pH  A0, A1, A2
     8, 9, 10,       // EC  A4, A5, A6
     11, 12, 13,     // TDS A4, A5, A6
-    1, 2, 3, 4,     // flujo D2, D3, D19, D18
+    1, 2, 0, 0,     // flujo D2, D3 (D19 y D18 sin sensor)
 };
 
 static SoftwareSerial mega;
@@ -60,14 +61,17 @@ static void subir() {
     }
 
     Lectura lote[TRAMA_N];
+    size_t n = 0;
     for (size_t i = 0; i < TRAMA_N; i++) {
-        lote[i] = {SENSORES[i], suma[i] / muestras};
+        if (SENSORES[i] != 0) {
+            lote[n++] = {SENSORES[i], suma[i] / muestras};
+        }
         suma[i] = 0;
     }
     Serial.printf("subiendo promedio de %u lineas\n", muestras);
     muestras = 0;
 
-    if (!dbEnviar(lote, TRAMA_N)) {
+    if (!dbEnviar(lote, n)) {
         Serial.println("lote no subido");
     }
 }
