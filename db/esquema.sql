@@ -85,12 +85,10 @@ insert into sbagua.columnas (id, equipo_id, numero, medio) values
 
 -- Mega (ARDUINO-SALA-1.ino). Los id deben coincidir con SENSORES[] en
 -- src/puente.cpp. Llegan ya calibrados, por eso factor queda null.
--- Las 3 columnas en uso. El flujo 4 (D18) no tiene columna todavía.
+-- Solo hay 2 medidores de flujo (D2 y D3); F3 y F4 del Mega no se suben.
 insert into sbagua.sensores (id, columna_id, tipo, modelo, unidad) values
     (1,  1,    'flujo', 'YF-S201',        'L/min'),  -- D2
     (2,  2,    'flujo', 'YF-S201',        'L/min'),  -- D3
-    (3,  3,    'flujo', 'YF-S201',        'L/min'),  -- D19
-    (4,  null, 'flujo', 'YF-S201',        'L/min'),  -- D18
     (5,  1,    'ph',    'pH analógico',   'pH'),     -- A0
     (6,  2,    'ph',    'pH analógico',   'pH'),     -- A1
     (7,  3,    'ph',    'pH analógico',   'pH'),     -- A2
